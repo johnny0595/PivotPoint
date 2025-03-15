@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 
+// Add API URL constant at the top - you'll update this with your Render URL
+const API_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://your-render-backend-url.onrender.com/api'
+  : 'http://localhost:5000/api';
+
 const PivotPoint = () => {
   const [darkMode, setDarkMode] = useState(false);
   const [decisions, setDecisions] = useState([]);
@@ -15,6 +20,9 @@ const PivotPoint = () => {
   const [newItemText, setNewItemText] = useState('');
   const [newItemWeight, setNewItemWeight] = useState(5);
   const [showArchived, setShowArchived] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [userId, setUserId] = useState(1); // Default user ID
 
   // Calculate totals
   const prosTotal = currentDecision.pros.reduce((sum, item) => sum + item.weight, 0);
@@ -49,53 +57,120 @@ const PivotPoint = () => {
   const tiltDegree = calculateTilt();
   
   // Add item to pros or cons
-  const addItem = (type) => {
+  const addItem = async (type) => {
     if (!newItemText.trim()) return;
     
-    const newItem = {
-      id: Date.now(),
-      text: newItemText,
-      weight: type === 'pro' ? Math.abs(newItemWeight) : -Math.abs(newItemWeight)
-    };
-    
-    const updatedDecision = { ...currentDecision };
-    if (type === 'pro') {
-      updatedDecision.pros = [...currentDecision.pros, newItem];
-    } else {
-      updatedDecision.cons = [...currentDecision.cons, newItem];
+    try {
+      const response = await fetch(`${API_URL}/decisions/${currentDecision.id}/items`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: newItemText,
+          weight: type === 'pro' ? Math.abs(newItemWeight) : -Math.abs(newItemWeight),
+          type: type
+        }),
+      });
+      
+      const newItem = await response.json();
+      
+      const updatedDecision = { ...currentDecision };
+      if (type === 'pro') {
+        updatedDecision.pros = [...currentDecision.pros, newItem];
+      } else {
+        updatedDecision.cons = [...currentDecision.cons, newItem];
+      }
+      
+      setCurrentDecision(updatedDecision);
+      
+      // Update the decision in the list
+      const updatedDecisions = decisions.map(d => 
+        d.id === updatedDecision.id ? updatedDecision : d
+      );
+      setDecisions(updatedDecisions);
+      
+      setNewItemText('');
+      setNewItemWeight(5);
+    } catch (error) {
+      console.error(`Error adding ${type}:`, error);
+      setError(`Failed to add ${type}`);
     }
-    
-    setCurrentDecision(updatedDecision);
-    saveDecision(updatedDecision);
-    setNewItemText('');
-    setNewItemWeight(5);
   };
   
   // Remove item
-  const removeItem = (id, type) => {
-    const updatedDecision = { ...currentDecision };
-    if (type === 'pro') {
-      updatedDecision.pros = currentDecision.pros.filter(item => item.id !== id);
-    } else {
-      updatedDecision.cons = currentDecision.cons.filter(item => item.id !== id);
+  const removeItem = async (id, type) => {
+    try {
+      await fetch(`${API_URL}/items/${id}`, {
+        method: 'DELETE'
+      });
+      
+      const updatedDecision = { ...currentDecision };
+      if (type === 'pro') {
+        updatedDecision.pros = currentDecision.pros.filter(item => item.id !== id);
+      } else {
+        updatedDecision.cons = currentDecision.cons.filter(item => item.id !== id);
+      }
+      
+      setCurrentDecision(updatedDecision);
+      
+      // Update the decision in the list
+      const updatedDecisions = decisions.map(d => 
+        d.id === updatedDecision.id ? updatedDecision : d
+      );
+      setDecisions(updatedDecisions);
+    } catch (error) {
+      console.error(`Error removing ${type}:`, error);
+      setError(`Failed to remove ${type}`);
     }
-    
-    setCurrentDecision(updatedDecision);
-    saveDecision(updatedDecision);
   };
   
   // Save current decision
-  const saveDecision = (decision) => {
-    const updatedDecisions = decisions.map(d => 
-      d.id === decision.id ? decision : d
-    );
-    
-    if (!updatedDecisions.some(d => d.id === decision.id)) {
-      updatedDecisions.push(decision);
+  const saveDecision = async (decision) => {
+    try {
+      // If the decision exists in our local state, update it. Otherwise, create a new one.
+      const exists = decisions.some(d => d.id === decision.id);
+      
+      if (exists) {
+        await fetch(`${API_URL}/decisions/${decision.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: decision.title,
+            archived: decision.archived
+          }),
+        });
+      } else {
+        const response = await fetch(`${API_URL}/decisions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            title: decision.title
+          }),
+        });
+        const newDecision = await response.json();
+        decision.id = newDecision.id;
+      }
+      
+      // Update the local state as before
+      const updatedDecisions = decisions.map(d => 
+        d.id === decision.id ? decision : d
+      );
+      
+      if (!updatedDecisions.some(d => d.id === decision.id)) {
+        updatedDecisions.push(decision);
+      }
+      
+      setDecisions(updatedDecisions);
+    } catch (error) {
+      console.error("Error saving decision:", error);
+      setError("Failed to save decision");
     }
-    
-    setDecisions(updatedDecisions);
-    localStorage.setItem('activeDecisions', JSON.stringify(updatedDecisions));
   };
   
   // Create new decision
@@ -182,24 +257,33 @@ const PivotPoint = () => {
     localStorage.setItem('darkMode', !darkMode);
   };
   
+  // Load saved decisions from API
+  const fetchDecisions = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/decisions?user_id=${userId}`);
+      const data = await response.json();
+      
+      setDecisions(data.active || []);
+      setArchivedDecisions(data.archived || []);
+      
+      if (data.active && data.active.length > 0) {
+        setCurrentDecision(data.active[0]);
+      }
+    } catch (error) {
+      console.error("Error fetching decisions:", error);
+      setError("Failed to load decisions");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Load saved decisions and preferences on mount
   useEffect(() => {
     const storedDarkMode = localStorage.getItem('darkMode') === 'true';
     setDarkMode(storedDarkMode);
     
-    try {
-      const storedDecisions = JSON.parse(localStorage.getItem('activeDecisions')) || [];
-      const storedArchived = JSON.parse(localStorage.getItem('archivedDecisions')) || [];
-      
-      setDecisions(storedDecisions);
-      setArchivedDecisions(storedArchived);
-      
-      if (storedDecisions.length > 0) {
-        setCurrentDecision(storedDecisions[0]);
-      }
-    } catch (error) {
-      console.error("Error loading saved decisions:", error);
-    }
+    fetchDecisions();
   }, []);
   
   // Apply dark mode class
