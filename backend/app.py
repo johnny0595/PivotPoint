@@ -66,9 +66,51 @@ def init_db():
     with app.app_context():
         db = get_db()
         cursor = db.cursor()
-        with app.open_resource('schema.sql', mode='r') as f:
-            cursor.execute(f.read())
+        
+        schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+        with open(schema_path, 'r') as f:
+            schema_sql = f.read()
+            cursor.execute(schema_sql)
+        
         db.commit()
+        logger.info("Database schema initialized successfully")
+
+def check_db_initialized():
+    """Check if database tables exist and create them if not"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        # Check if the users table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'users'
+            );
+        """)
+        users_table_exists = cursor.fetchone()[0]
+        
+        if not users_table_exists:
+            logger.info("Database tables don't exist. Initializing schema...")
+            
+            # Read and execute schema.sql
+            schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+            with open(schema_path, 'r') as f:
+                schema_sql = f.read()
+                cursor.execute(schema_sql)
+            
+            conn.commit()
+            logger.info("Database schema initialized successfully")
+        else:
+            logger.info("Database schema already exists")
+        
+    except Exception as e:
+        logger.error(f"Error checking database schema: {e}")
+        raise
+
+# Initialize database tables on application startup
+with app.app_context():
+    check_db_initialized()
 
 # Add a catch-all route for 404 errors
 @app.route('/', defaults={'path': ''})
@@ -410,19 +452,33 @@ def health_check():
         # Test database connection
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT 1')
-        cursor.fetchone()
+        
+        # Check if tables exist
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'users'
+            );
+        """)
+        tables_exist = cursor.fetchone()[0]
+        
+        if not tables_exist:
+            # Initialize the database if tables don't exist
+            check_db_initialized()
+            db_status = "initialized"
+        else:
+            db_status = "connected"
         
         return jsonify({
             'status': 'healthy',
-            'database': 'connected',
+            'database': db_status,
             'environment': os.environ.get('FLASK_ENV', 'development')
         }), 200
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return jsonify({
             'status': 'unhealthy',
-            'database': 'disconnected',
+            'database': 'error',
             'error': str(e)
         }), 500
 
