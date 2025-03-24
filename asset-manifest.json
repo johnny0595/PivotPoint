@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/PivotPoint/static/css/main.950f7083.css",
+    "main.js": "/PivotPoint/static/js/main.79bffed9.js",
+    "static/js/453.17a94415.chunk.js": "/PivotPoint/static/js/453.17a94415.chunk.js",
+    "index.html": "/PivotPoint/index.html",
+    "main.950f7083.css.map": "/PivotPoint/static/css/main.950f7083.css.map",
+    "main.79bffed9.js.map": "/PivotPoint/static/js/main.79bffed9.js.map",
+    "453.17a94415.chunk.js.map": "/PivotPoint/static/js/453.17a94415.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.950f7083.css",
+    "static/js/main.79bffed9.js"
+  ]
+}
