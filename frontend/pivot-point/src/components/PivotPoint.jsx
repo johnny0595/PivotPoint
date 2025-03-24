@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
-// Add API URL constant at the top - you'll update this with your Render URL
-const API_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://your-render-backend-url.onrender.com/api'
-  : 'http://localhost:5000/api';
+// Update the API_URL constant at the top
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
 const PivotPoint = () => {
   const [darkMode, setDarkMode] = useState(false);
@@ -61,7 +59,47 @@ const PivotPoint = () => {
     if (!newItemText.trim()) return;
     
     try {
-      const response = await fetch(`${API_URL}/decisions/${currentDecision.id}/items`, {
+      // Check if the decision exists in the database (has a numeric ID)
+      // If not, save it first
+      let targetDecision = currentDecision;
+      
+      // If the decision ID is a large timestamp-like number and not yet saved to DB
+      if (!decisions.some(d => d.id === currentDecision.id)) {
+        console.log("Saving decision before adding item...");
+        const response = await fetch(`${API_URL}/decisions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            title: currentDecision.title
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to save decision: ${response.status}`);
+        }
+        
+        // Get the new decision with server-assigned ID
+        const savedDecision = await response.json();
+        console.log("Decision saved with ID:", savedDecision.id);
+        
+        // Update our current decision with the server ID
+        targetDecision = {
+          ...currentDecision,
+          id: savedDecision.id
+        };
+        setCurrentDecision(targetDecision);
+        
+        // Add to decisions list
+        const updatedDecisions = [...decisions, targetDecision];
+        setDecisions(updatedDecisions);
+      }
+      
+      // Now add the item using the proper decision ID
+      console.log(`Adding ${type} to decision ${targetDecision.id}...`);
+      const response = await fetch(`${API_URL}/decisions/${targetDecision.id}/items`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -73,13 +111,18 @@ const PivotPoint = () => {
         }),
       });
       
+      if (!response.ok) {
+        throw new Error(`Failed to add item: ${response.status}`);
+      }
+      
       const newItem = await response.json();
       
-      const updatedDecision = { ...currentDecision };
+      // Update the decision with the new item
+      const updatedDecision = { ...targetDecision };
       if (type === 'pro') {
-        updatedDecision.pros = [...currentDecision.pros, newItem];
+        updatedDecision.pros = [...targetDecision.pros, newItem];
       } else {
-        updatedDecision.cons = [...currentDecision.cons, newItem];
+        updatedDecision.cons = [...targetDecision.cons, newItem];
       }
       
       setCurrentDecision(updatedDecision);
@@ -88,13 +131,17 @@ const PivotPoint = () => {
       const updatedDecisions = decisions.map(d => 
         d.id === updatedDecision.id ? updatedDecision : d
       );
-      setDecisions(updatedDecisions);
       
+      if (!updatedDecisions.some(d => d.id === updatedDecision.id)) {
+        updatedDecisions.push(updatedDecision);
+      }
+      
+      setDecisions(updatedDecisions);
       setNewItemText('');
       setNewItemWeight(5);
     } catch (error) {
       console.error(`Error adding ${type}:`, error);
-      setError(`Failed to add ${type}`);
+      setError(`Failed to add ${type}: ${error.message}`);
     }
   };
   
@@ -175,11 +222,14 @@ const PivotPoint = () => {
   
   // Create new decision
   const createNewDecision = () => {
-    // Save current if modified
-    saveDecision(currentDecision);
+    // Save current decision if it has items
+    if ((currentDecision.pros.length > 0 || currentDecision.cons.length > 0) && 
+        !decisions.some(d => d.id === currentDecision.id)) {
+      saveDecision(currentDecision);
+    }
     
     const newDecision = {
-      id: Date.now(),
+      id: Date.now(), // This is a temporary ID
       title: 'New Decision',
       pros: [],
       cons: [],
@@ -260,9 +310,24 @@ const PivotPoint = () => {
   // Load saved decisions from API
   const fetchDecisions = async () => {
     setIsLoading(true);
+    setError(null);
     try {
-      const response = await fetch(`${API_URL}/decisions?user_id=${userId}`);
+      console.log(`Fetching decisions from: ${API_URL}/decisions?user_id=${userId}`);
+      const response = await fetch(`${API_URL}/decisions?user_id=${userId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        mode: 'cors', // Explicitly set CORS mode
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      
       const data = await response.json();
+      console.log("Received decision data:", data);
       
       setDecisions(data.active || []);
       setArchivedDecisions(data.archived || []);
@@ -272,7 +337,7 @@ const PivotPoint = () => {
       }
     } catch (error) {
       console.error("Error fetching decisions:", error);
-      setError("Failed to load decisions");
+      setError(`Failed to load decisions: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -297,6 +362,22 @@ const PivotPoint = () => {
 
   return (
     <div className={`h-screen flex ${darkMode ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'}`}>
+      {/* Error message */}
+      {error && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded shadow-lg z-50">
+          {error}
+        </div>
+      )}
+      
+      {/* Loading indicator */}
+      {isLoading && (
+        <div className="absolute inset-0 bg-black/20 flex items-center justify-center z-40">
+          <div className="bg-white p-4 rounded shadow-lg">
+            Loading...
+          </div>
+        </div>
+      )}
+      
       {/* Sidebar */}
       <div className={`w-64 p-4 border-r ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center justify-between mb-6">

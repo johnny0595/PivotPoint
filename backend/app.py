@@ -11,15 +11,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+
+# Configure CORS properly - this is the most important part
+CORS(app, 
+     resources={
+         r"/*": {
+             "origins": "http://localhost:3000",  
+             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"]
+         }
+     },
+     supports_credentials=True)
 
 # Get database connection information from environment variables
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql:///pivotpoint')
 
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
-        db = g._database = psycopg2.connect(DATABASE_URL)
+        try:
+            db = g._database = psycopg2.connect(DATABASE_URL)
+        except psycopg2.Error as e:
+            print(f"Database connection error: {e}")
+            raise
     return db
 
 @app.teardown_appcontext
@@ -339,10 +353,20 @@ def login():
     else:
         return jsonify({'error': 'Invalid credentials'}), 401
 
+# Add a test CORS endpoint for debugging
+@app.route('/api/test-cors', methods=['GET'])
+def test_cors():
+    return jsonify({"message": "CORS is working correctly!"}), 200
+
 # Render health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy'}), 200
+
+@app.errorhandler(Exception)
+def handle_error(e):
+    app.logger.error(f"Unhandled exception: {str(e)}")
+    return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
