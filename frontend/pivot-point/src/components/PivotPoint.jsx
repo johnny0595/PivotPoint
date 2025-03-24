@@ -249,49 +249,77 @@ const PivotPoint = () => {
   };
   
   // Archive a decision
-  const archiveDecision = (id) => {
+  const archiveDecision = async (id) => {
     const decision = decisions.find(d => d.id === id);
     if (!decision) return;
     
-    // Update decision
-    const updatedDecision = { ...decision, archived: true };
-    
-    // Remove from active
-    const updatedDecisions = decisions.filter(d => d.id !== id);
-    setDecisions(updatedDecisions);
-    localStorage.setItem('activeDecisions', JSON.stringify(updatedDecisions));
-    
-    // Add to archived
-    const updatedArchived = [...archivedDecisions, updatedDecision];
-    setArchivedDecisions(updatedArchived);
-    localStorage.setItem('archivedDecisions', JSON.stringify(updatedArchived));
-    
-    // If current decision is archived, create new one
-    if (currentDecision.id === id) {
-      createNewDecision();
+    try {
+      // Update decision on the server first
+      await fetch(`${API_URL}/decisions/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          archived: true
+        }),
+      });
+      
+      // Update decision in local state
+      const updatedDecision = { ...decision, archived: true };
+      
+      // Remove from active
+      const updatedDecisions = decisions.filter(d => d.id !== id);
+      setDecisions(updatedDecisions);
+      
+      // Add to archived
+      const updatedArchived = [...archivedDecisions, updatedDecision];
+      setArchivedDecisions(updatedArchived);
+      
+      // If current decision is archived, create new one
+      if (currentDecision.id === id) {
+        createNewDecision();
+      }
+    } catch (error) {
+      console.error("Error archiving decision:", error);
+      setError("Failed to archive decision");
     }
   };
-  
+
   // Restore a decision from archive
-  const restoreDecision = (id) => {
+  const restoreDecision = async (id) => {
     const decision = archivedDecisions.find(d => d.id === id);
     if (!decision) return;
     
-    // Update decision
-    const updatedDecision = { ...decision, archived: false };
-    
-    // Remove from archived
-    const updatedArchived = archivedDecisions.filter(d => d.id !== id);
-    setArchivedDecisions(updatedArchived);
-    localStorage.setItem('archivedDecisions', JSON.stringify(updatedArchived));
-    
-    // Add to active
-    const updatedDecisions = [...decisions, updatedDecision];
-    setDecisions(updatedDecisions);
-    localStorage.setItem('activeDecisions', JSON.stringify(updatedDecisions));
-    
-    // Load the restored decision
-    setCurrentDecision(updatedDecision);
+    try {
+      // Update decision on the server first
+      await fetch(`${API_URL}/decisions/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          archived: false
+        }),
+      });
+      
+      // Update decision in local state
+      const updatedDecision = { ...decision, archived: false };
+      
+      // Remove from archived
+      const updatedArchived = archivedDecisions.filter(d => d.id !== id);
+      setArchivedDecisions(updatedArchived);
+      
+      // Add to active
+      const updatedDecisions = [...decisions, updatedDecision];
+      setDecisions(updatedDecisions);
+      
+      // Load the restored decision
+      setCurrentDecision(updatedDecision);
+    } catch (error) {
+      console.error("Error restoring decision:", error);
+      setError("Failed to restore decision");
+    }
   };
   
   // Update decision title
