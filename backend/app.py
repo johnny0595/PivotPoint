@@ -12,11 +12,14 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Configure CORS properly - this is the most important part
+# Get allowed origins from environment variable or use default
+CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,https://johnny0595.github.io').split(',')
+
+# Configure CORS properly for deployment
 CORS(app, 
      resources={
          r"/*": {
-             "origins": "http://localhost:3000",  
+             "origins": CORS_ORIGINS,  
              "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
              "allow_headers": ["Content-Type", "Authorization"]
          }
@@ -24,7 +27,14 @@ CORS(app,
      supports_credentials=True)
 
 # Get database connection information from environment variables
+# The PostgreSQL URL can come in two formats:
+# - postgres:// (local development)
+# - postgresql:// (render.com hosted database)
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql:///pivotpoint')
+
+# If the URL starts with postgres://, change it to postgresql:// (Render compatibility)
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
 def get_db():
     db = getattr(g, '_database', None)

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: pivotpoint-backend
+    env: python
+    region: oregon  # Choose the region closest to your users
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://pivotpoint_user:cz3dsklwcuWHBL1WfGHY8kD6fwBpaWwy@dpg-cvgd3plrie7s73bofiig-a.oregon-postgres.render.com/pivotpoint
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_APP
+        value: app.py
+      - key: CORS_ORIGINS
+        value: "https://johnny0595.github.io"
+
+databases:
+  - name: pivotpoint-db
+    databaseName: pivotpoint
+    user: pivotpoint_user
