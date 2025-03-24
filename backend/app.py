@@ -6,6 +6,11 @@ import json
 from datetime import datetime
 from flask_cors import CORS
 from dotenv import load_dotenv
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -26,23 +31,28 @@ CORS(app,
      },
      supports_credentials=True)
 
-# Get database connection information from environment variables
-# The PostgreSQL URL can come in two formats:
-# - postgres:// (local development)
-# - postgresql:// (render.com hosted database)
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql:///pivotpoint')
+# Remote database connection (for Render deployment)
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://pivotpoint_user:cz3dsklwcuWHBL1WfGHY8kD6fwBpaWwy@dpg-cvgd3plrie7s73bofiig-a.oregon-postgres.render.com/pivotpoint')
 
 # If the URL starts with postgres://, change it to postgresql:// (Render compatibility)
 if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
+logger.info(f"Using DATABASE_URL: {DATABASE_URL}")
+
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
         try:
-            db = g._database = psycopg2.connect(DATABASE_URL)
+            logger.info(f"Connecting to database at: {DATABASE_URL}")
+            # Force sslmode to require for remote connections
+            connect_args = {}
+            if 'localhost' not in DATABASE_URL and '127.0.0.1' not in DATABASE_URL:
+                connect_args['sslmode'] = 'require'
+            
+            db = g._database = psycopg2.connect(DATABASE_URL, **connect_args)
         except psycopg2.Error as e:
-            print(f"Database connection error: {e}")
+            logger.error(f"Database connection error: {e}")
             raise
     return db
 
@@ -60,43 +70,68 @@ def init_db():
             cursor.execute(f.read())
         db.commit()
 
+# Add a catch-all route for 404 errors
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def catch_all(path):
+    # Only handle paths that don't match other routes
+    if path and not path.startswith(('api/', 'health')):
+        return jsonify({
+            'error': f"Route not found: /{path}",
+            'available_routes': [
+                '/api/decisions',
+                '/api/decisions/<id>',
+                '/api/decisions/<id>/items',
+                '/api/items/<id>',
+                '/api/users',
+                '/api/auth/login',
+                '/api/test-cors',
+                '/health'
+            ]
+        }), 404
+    return jsonify({'message': 'PivotPoint API', 'status': 'healthy'}), 200
+
 @app.route('/api/decisions', methods=['GET'])
 def get_decisions():
-    user_id = request.args.get('user_id', '1')  # Default to user 1 if not specified
-    
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    # Get active decisions
-    cursor.execute(
-        'SELECT * FROM decisions WHERE user_id = %s AND archived = FALSE ORDER BY updated_at DESC',
-        (user_id,)
-    )
-    active_decisions = cursor.fetchall()
-    
-    # Get archived decisions
-    cursor.execute(
-        'SELECT * FROM decisions WHERE user_id = %s AND archived = TRUE ORDER BY updated_at DESC',
-        (user_id,)
-    )
-    archived_decisions = cursor.fetchall()
-    
-    # Convert to dictionaries
-    active_decisions_list = [dict(decision) for decision in active_decisions]
-    archived_decisions_list = [dict(decision) for decision in archived_decisions]
-    
-    result = {
-        'active': active_decisions_list,
-        'archived': archived_decisions_list
-    }
-    
-    # Get the items for each decision
-    for decision_list in [result['active'], result['archived']]:
-        for decision in decision_list:
-            decision['pros'] = get_items(decision['id'], 'pro')
-            decision['cons'] = get_items(decision['id'], 'con')
-    
-    return jsonify(result)
+    try:
+        user_id = request.args.get('user_id', '1')  # Default to user 1 if not specified
+        
+        conn = get_db()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Get active decisions
+        cursor.execute(
+            'SELECT * FROM decisions WHERE user_id = %s AND archived = FALSE ORDER BY updated_at DESC',
+            (user_id,)
+        )
+        active_decisions = cursor.fetchall()
+        
+        # Get archived decisions
+        cursor.execute(
+            'SELECT * FROM decisions WHERE user_id = %s AND archived = TRUE ORDER BY updated_at DESC',
+            (user_id,)
+        )
+        archived_decisions = cursor.fetchall()
+        
+        # Convert to dictionaries
+        active_decisions_list = [dict(decision) for decision in active_decisions]
+        archived_decisions_list = [dict(decision) for decision in archived_decisions]
+        
+        result = {
+            'active': active_decisions_list,
+            'archived': archived_decisions_list
+        }
+        
+        # Get the items for each decision
+        for decision_list in [result['active'], result['archived']]:
+            for decision in decision_list:
+                decision['pros'] = get_items(decision['id'], 'pro')
+                decision['cons'] = get_items(decision['id'], 'con')
+        
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in get_decisions: {e}")
+        return jsonify({"error": str(e)}), 500
 
 def get_items(decision_id, item_type):
     conn = get_db()
@@ -371,11 +406,29 @@ def test_cors():
 # Render health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({'status': 'healthy'}), 200
+    try:
+        # Test database connection
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1')
+        cursor.fetchone()
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'environment': os.environ.get('FLASK_ENV', 'development')
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'database': 'disconnected',
+            'error': str(e)
+        }), 500
 
 @app.errorhandler(Exception)
 def handle_error(e):
-    app.logger.error(f"Unhandled exception: {str(e)}")
+    logger.error(f"Unhandled exception: {str(e)}")
     return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
