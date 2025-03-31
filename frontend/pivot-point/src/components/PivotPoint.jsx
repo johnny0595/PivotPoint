@@ -21,6 +21,7 @@ const PivotPoint = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [userId, setUserId] = useState(1); // Default user ID
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   // Calculate totals
   const prosTotal = currentDecision.pros.reduce((sum, item) => sum + item.weight, 0);
@@ -322,6 +323,43 @@ const PivotPoint = () => {
     }
   };
   
+  // Delete a decision
+  const deleteDecision = async (id) => {
+    const decision = decisions.find(d => d.id === id) || archivedDecisions.find(d => d.id === id);
+    if (!decision) return;
+    
+    try {
+      // Call the API to delete the decision
+      await fetch(`${API_URL}/decisions/${id}`, {
+        method: 'DELETE'
+      });
+      
+      // Remove from the appropriate list
+      if (decision.archived) {
+        setArchivedDecisions(archivedDecisions.filter(d => d.id !== id));
+      } else {
+        setDecisions(decisions.filter(d => d.id !== id));
+      }
+      
+      // If the current decision is deleted, create a new one
+      if (currentDecision.id === id) {
+        createNewDecision();
+      }
+      
+      // Clear the confirmation state
+      setConfirmDelete(null);
+    } catch (error) {
+      console.error("Error deleting decision:", error);
+      setError("Failed to delete decision");
+      setConfirmDelete(null);
+    }
+  };
+
+  // Confirmation dialog for delete
+  const confirmDeleteDialog = (id) => {
+    setConfirmDelete(id);
+  };
+
   // Update decision title
   const updateTitle = (title) => {
     const updatedDecision = { ...currentDecision, title };
@@ -406,6 +444,30 @@ const PivotPoint = () => {
         </div>
       )}
       
+      {/* Delete confirmation dialog */}
+      {confirmDelete && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className={`p-6 rounded-lg shadow-xl ${darkMode ? 'bg-gray-800' : 'bg-white'} max-w-md mx-auto`}>
+            <h3 className="font-bold text-lg mb-4">Delete Decision</h3>
+            <p className="mb-6">Are you sure you want to delete this decision? This action cannot be undone.</p>
+            <div className="flex justify-end space-x-3">
+              <button 
+                onClick={() => setConfirmDelete(null)} 
+                className={`px-4 py-2 rounded ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => deleteDecision(confirmDelete)} 
+                className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Sidebar */}
       <div className={`w-64 p-4 border-r ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center justify-between mb-6">
@@ -428,19 +490,33 @@ const PivotPoint = () => {
         <h2 className="font-bold mb-2">Active Decisions</h2>
         <ul className="mb-4 space-y-1">
           {decisions.map(decision => (
-            <li key={decision.id} className="flex justify-between items-center">
+            <li key={decision.id} className="flex items-center group">
               <button 
                 onClick={() => loadDecision(decision.id)}
-                className={`text-left overflow-hidden overflow-ellipsis whitespace-nowrap ${currentDecision.id === decision.id ? (darkMode ? 'text-blue-400 font-bold' : 'text-blue-600 font-bold') : ''}`}
+                className={`text-left overflow-hidden overflow-ellipsis whitespace-nowrap flex-grow ${currentDecision.id === decision.id ? (darkMode ? 'text-blue-400 font-bold' : 'text-blue-600 font-bold') : ''}`}
               >
                 {decision.title}
               </button>
-              <button 
-                onClick={() => archiveDecision(decision.id)}
-                className={`text-xs px-1 ${darkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Archive
-              </button>
+              <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button 
+                  onClick={() => archiveDecision(decision.id)}
+                  title="Archive"
+                  className={`p-1 rounded ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                  </svg>
+                </button>
+                <button 
+                  onClick={() => confirmDeleteDialog(decision.id)}
+                  title="Delete"
+                  className={`p-1 rounded text-red-500 ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
             </li>
           ))}
           {decisions.length === 0 && (
@@ -458,19 +534,33 @@ const PivotPoint = () => {
         {showArchived && (
           <ul className="mt-2 pl-4 space-y-1">
             {archivedDecisions.map(decision => (
-              <li key={decision.id} className="flex justify-between items-center">
+              <li key={decision.id} className="flex items-center group">
                 <button 
                   onClick={() => loadDecision(decision.id)}
-                  className="text-left overflow-hidden overflow-ellipsis whitespace-nowrap text-gray-500"
+                  className="text-left overflow-hidden overflow-ellipsis whitespace-nowrap text-gray-500 flex-grow"
                 >
                   {decision.title}
                 </button>
-                <button 
-                  onClick={() => restoreDecision(decision.id)}
-                  className={`text-xs px-1 ${darkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Restore
-                </button>
+                <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => restoreDecision(decision.id)}
+                    title="Restore"
+                    className={`p-1 rounded ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                    </svg>
+                  </button>
+                  <button 
+                    onClick={() => confirmDeleteDialog(decision.id)}
+                    title="Delete"
+                    className={`p-1 rounded text-red-500 ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
               </li>
             ))}
             {archivedDecisions.length === 0 && (

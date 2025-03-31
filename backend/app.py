@@ -19,17 +19,10 @@ app = Flask(__name__)
 
 # Get allowed origins from environment variable or use default
 CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,https://johnny0595.github.io').split(',')
+logger.info(f"CORS_ORIGINS: {CORS_ORIGINS}")
 
-# Configure CORS properly for deployment
-CORS(app, 
-     resources={
-         r"/*": {
-             "origins": CORS_ORIGINS,  
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-             "allow_headers": ["Content-Type", "Authorization"]
-         }
-     },
-     supports_credentials=True)
+# Enable CORS for all routes
+CORS(app, origins=CORS_ORIGINS, supports_credentials=True)
 
 # Remote database connection (for Render deployment)
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://pivotpoint_user:cz3dsklwcuWHBL1WfGHY8kD6fwBpaWwy@dpg-cvgd3plrie7s73bofiig-a.oregon-postgres.render.com/pivotpoint')
