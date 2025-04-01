@@ -3,10 +3,13 @@ import psycopg2
 import psycopg2.extras
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask_cors import CORS
 from dotenv import load_dotenv
 import logging
+import bcrypt
+import jwt
+from functools import wraps
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,6 +35,10 @@ if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 
 logger.info(f"Using DATABASE_URL: {DATABASE_URL}")
+
+# JWT configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', 'your_jwt_secret_key')  # In production, use env var
+JWT_EXPIRATION = 24 * 60 * 60  # 24 hours in seconds
 
 def get_db():
     db = getattr(g, '_database', None)
@@ -95,7 +102,40 @@ def check_db_initialized():
             conn.commit()
             logger.info("Database schema initialized successfully")
         else:
-            logger.info("Database schema already exists")
+            logger.info("Users table exists. Checking for password_hash column...")
+            
+            # Check if password_hash column exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'password_hash'
+                );
+            """)
+            has_password_hash = cursor.fetchone()[0]
+            
+            # Check if old password column exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'password'
+                );
+            """)
+            has_password = cursor.fetchone()[0]
+            
+            if not has_password_hash and has_password:
+                # Need to rename the column
+                logger.info("Migrating password column to password_hash...")
+                cursor.execute("ALTER TABLE users RENAME COLUMN password TO password_hash;")
+                conn.commit()
+                logger.info("Successfully renamed password column to password_hash")
+            elif not has_password_hash and not has_password:
+                # Need to add the column
+                logger.info("Adding password_hash column to users table...")
+                cursor.execute("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT '';")
+                conn.commit()
+                logger.info("Successfully added password_hash column")
+            else:
+                logger.info("Database schema is up to date")
         
     except Exception as e:
         logger.error(f"Error checking database schema: {e}")
@@ -104,6 +144,75 @@ def check_db_initialized():
 # Initialize database tables on application startup
 with app.app_context():
     check_db_initialized()
+
+# User authentication middleware
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        auth_header = request.headers.get('Authorization')
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        if not token:
+            return jsonify({'error': 'Authentication token is missing'}), 401
+        
+        try:
+            # Log the token for debugging
+            logger.info(f"Decoding token: {token[:10]}...")
+            
+            # Decode the token
+            payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+            user_id = payload['user_id']
+            
+            # Log successful decoding
+            logger.info(f"Token decoded, user_id: {user_id}")
+            
+            # Check if user exists
+            conn = get_db()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cursor.execute('SELECT id FROM users WHERE id = %s', (user_id,))
+            user = cursor.fetchone()
+            
+            if not user:
+                logger.warning(f"User not found for id: {user_id}")
+                return jsonify({'error': 'User not found'}), 401
+            
+            # Add user_id to request for use in route handlers
+            request.user_id = user_id
+            
+        except jwt.ExpiredSignatureError as e:
+            logger.error(f"Token expired: {str(e)}")
+            return jsonify({'error': 'Token has expired'}), 401
+        except jwt.InvalidTokenError as e:
+            logger.error(f"Invalid token: {str(e)}")
+            return jsonify({'error': 'Invalid token'}), 401
+        except Exception as e:
+            logger.error(f"Token validation error: {str(e)}")
+            return jsonify({'error': f'Token validation failed: {str(e)}'}), 500
+        
+        return f(*args, **kwargs)
+    
+    return decorated
+
+# Add this function before it's used in the routes
+def get_items(decision_id, item_type):
+    """Fetch items (pros or cons) for a specific decision"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        cursor.execute(
+            'SELECT * FROM items WHERE decision_id = %s AND type = %s',
+            (decision_id, item_type)
+        )
+        
+        items = cursor.fetchall()
+        return [dict(item) for item in items]
+    except Exception as e:
+        logger.error(f"Error fetching items: {e}")
+        return []
 
 # Add a catch-all route for 404 errors
 @app.route('/', defaults={'path': ''})
@@ -120,16 +229,196 @@ def catch_all(path):
                 '/api/items/<id>',
                 '/api/users',
                 '/api/auth/login',
+                '/api/register',
+                '/api/user',
                 '/api/test-cors',
                 '/health'
             ]
         }), 404
     return jsonify({'message': 'PivotPoint API', 'status': 'healthy'}), 200
 
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.json
+    username = data.get('username', '')
+    email = data.get('email', '')
+    password = data.get('password', '')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
+    
+    # Validate password strength
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters long'}), 400
+    
+    try:
+        # Hash the password with bcrypt
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        password_hash_str = password_hash.decode('utf-8')
+        
+        conn = get_db()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Check if password_hash column exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.columns 
+                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'password_hash'
+            );
+        """)
+        has_password_hash = cursor.fetchone()[0]
+        
+        # Check if old password column exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.columns 
+                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'password'
+            );
+        """)
+        has_password = cursor.fetchone()[0]
+        
+        # Insert based on which columns exist
+        if has_password_hash:
+            cursor.execute(
+                'INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING id',
+                (username, email, password_hash_str)
+            )
+        elif has_password:
+            cursor.execute(
+                'INSERT INTO users (username, email, password) VALUES (%s, %s, %s) RETURNING id',
+                (username, email, password_hash_str)
+            )
+        else:
+            return jsonify({'error': 'Database schema is not properly configured'}), 500
+            
+        user_id = cursor.fetchone()[0]
+        conn.commit()
+        
+        # Generate JWT token with string secret key
+        token = jwt.encode({
+            'user_id': user_id,
+            'exp': datetime.utcnow() + timedelta(seconds=JWT_EXPIRATION)
+        }, JWT_SECRET, algorithm='HS256')
+        
+        # If token is bytes, decode to string (for older PyJWT versions)
+        if isinstance(token, bytes):
+            token = token.decode('utf-8')
+            
+        logger.info(f"Registration successful for user: {username}")
+        logger.info(f"Generated token: {token[:10]}...")
+        
+        return jsonify({
+            'id': user_id,
+            'username': username,
+            'email': email,
+            'token': token
+        })
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return jsonify({'error': 'Username or email already exists'}), 400
+    except Exception as e:
+        logger.error(f"Registration error: {e}")
+        conn.rollback() if 'conn' in locals() else None
+        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    return login()
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    data = request.json
+    username_or_email = data.get('username', '')
+    password = data.get('password', '')
+    
+    if not username_or_email or not password:
+        return jsonify({'error': 'Username/email and password are required'}), 400
+    
+    try:
+        conn = get_db()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Check if password_hash column exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.columns 
+                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'password_hash'
+            );
+        """)
+        has_password_hash = cursor.fetchone()[0]
+        
+        # Check if old password column exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.columns 
+                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'password'
+            );
+        """)
+        has_password = cursor.fetchone()[0]
+        
+        # Determine which password column to use
+        pw_column = 'password_hash' if has_password_hash else 'password'
+        
+        # Try to find user by username or email
+        cursor.execute(
+            f'SELECT id, username, email, {pw_column} as pw FROM users WHERE username = %s OR email = %s',
+            (username_or_email, username_or_email)
+        )
+            
+        user = cursor.fetchone()
+        
+        if user and bcrypt.checkpw(password.encode('utf-8'), user['pw'].encode('utf-8')):
+            # Generate JWT token with string secret key
+            token = jwt.encode({
+                'user_id': user['id'],
+                'exp': datetime.utcnow() + timedelta(seconds=JWT_EXPIRATION)
+            }, JWT_SECRET, algorithm='HS256')
+            
+            # If token is bytes, decode to string (for older PyJWT versions)
+            if isinstance(token, bytes):
+                token = token.decode('utf-8')
+                
+            logger.info(f"Login successful for user: {user['username']}")
+            logger.info(f"Generated token: {token[:10]}...")
+                
+            return jsonify({
+                'id': user['id'],
+                'username': user['username'],
+                'email': user['email'],
+                'token': token
+            })
+        else:
+            return jsonify({'error': 'Invalid credentials'}), 401
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        return jsonify({'error': f'Login failed: {str(e)}'}), 500
+
+@app.route('/api/user', methods=['GET'])
+@token_required
+def get_user():
+    user_id = request.user_id
+    
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cursor.execute(
+        'SELECT id, username, email, created_at FROM users WHERE id = %s',
+        (user_id,)
+    )
+    user = cursor.fetchone()
+    
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify(dict(user))
+
 @app.route('/api/decisions', methods=['GET'])
+@token_required
 def get_decisions():
     try:
-        user_id = request.args.get('user_id', '1')  # Default to user 1 if not specified
+        # Use authenticated user_id instead of query parameter
+        user_id = request.user_id
+        logger.info(f"Fetching decisions for user_id: {user_id}")
         
         conn = get_db()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -168,22 +457,12 @@ def get_decisions():
         logger.error(f"Error in get_decisions: {e}")
         return jsonify({"error": str(e)}), 500
 
-def get_items(decision_id, item_type):
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    cursor.execute(
-        'SELECT * FROM items WHERE decision_id = %s AND type = %s ORDER BY id',
-        (decision_id, item_type)
-    )
-    items = cursor.fetchall()
-    
-    return [dict(item) for item in items]
-
 @app.route('/api/decisions', methods=['POST'])
+@token_required
 def create_decision():
     data = request.json
-    user_id = data.get('user_id', '1')  # Default to user 1 if not specified
+    # Use authenticated user_id instead of request data
+    user_id = request.user_id
     title = data.get('title', 'New Decision')
     
     conn = get_db()
@@ -211,6 +490,7 @@ def create_decision():
     })
 
 @app.route('/api/decisions/<int:decision_id>', methods=['PUT'])
+@token_required
 def update_decision(decision_id):
     data = request.json
     title = data.get('title')
@@ -248,6 +528,7 @@ def update_decision(decision_id):
     return jsonify(result)
 
 @app.route('/api/decisions/<int:decision_id>', methods=['DELETE'])
+@token_required
 def delete_decision(decision_id):
     conn = get_db()
     cursor = conn.cursor()
@@ -262,6 +543,7 @@ def delete_decision(decision_id):
     return jsonify({'success': True})
 
 @app.route('/api/decisions/<int:decision_id>/items', methods=['POST'])
+@token_required
 def add_item(decision_id):
     data = request.json
     text = data.get('text', '')
@@ -304,6 +586,7 @@ def add_item(decision_id):
     })
 
 @app.route('/api/items/<int:item_id>', methods=['PUT'])
+@token_required
 def update_item(item_id):
     data = request.json
     text = data.get('text')
@@ -351,6 +634,7 @@ def update_item(item_id):
     return jsonify(dict(item))
 
 @app.route('/api/items/<int:item_id>', methods=['DELETE'])
+@token_required
 def delete_item(item_id):
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -375,65 +659,6 @@ def delete_item(item_id):
     
     return jsonify({'success': True})
 
-@app.route('/api/users', methods=['POST'])
-def create_user():
-    data = request.json
-    username = data.get('username', '')
-    email = data.get('email', '')
-    password = data.get('password', '')  # In a real app, you'd hash this
-    
-    if not username or not password:
-        return jsonify({'error': 'Username and password are required'}), 400
-    
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    try:
-        cursor.execute(
-            'INSERT INTO users (username, email, password) VALUES (%s, %s, %s) RETURNING id',
-            (username, email, password)  # Again, hash the password in production
-        )
-        user_id = cursor.fetchone()[0]
-        conn.commit()
-        
-        return jsonify({
-            'id': user_id,
-            'username': username,
-            'email': email
-        })
-    except psycopg2.errors.UniqueViolation:
-        conn.rollback()
-        return jsonify({'error': 'Username or email already exists'}), 400
-
-@app.route('/api/auth/login', methods=['POST'])
-def login():
-    data = request.json
-    username = data.get('username', '')
-    password = data.get('password', '')  # In a real app, you'd verify against a hash
-    
-    if not username or not password:
-        return jsonify({'error': 'Username and password are required'}), 400
-    
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    
-    cursor.execute(
-        'SELECT * FROM users WHERE username = %s AND password = %s',
-        (username, password)  # Again, verify hash in production
-    )
-    user = cursor.fetchone()
-    
-    if user:
-        return jsonify({
-            'id': user['id'],
-            'username': user['username'],
-            'email': user['email'],
-            'token': f"dummy_token_{user['id']}"  # In a real app, generate a proper JWT
-        })
-    else:
-        return jsonify({'error': 'Invalid credentials'}), 401
-
-# Add a test CORS endpoint for debugging
 @app.route('/api/test-cors', methods=['GET'])
 def test_cors():
     return jsonify({"message": "CORS is working correctly!"}), 200

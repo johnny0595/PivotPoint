@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(100) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE,
-    password VARCHAR(255) NOT NULL,  -- In production, store hashed passwords
+    password_hash VARCHAR(255) NOT NULL,  -- Store password hash, not plain text
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS items (
     FOREIGN KEY (decision_id) REFERENCES decisions (id) ON DELETE CASCADE
 );
 
--- Create an initial user for testing
-INSERT INTO users (username, email, password)
-VALUES ('test', 'test@example.com', 'password')
+-- Create an initial user for testing - with a hashed password for 'password'
+INSERT INTO users (username, email, password_hash)
+VALUES ('test', 'test@example.com', '$2b$12$1QkLGPXiYcV5OVRkQEV2NuJW7cTqAGNqQUiSQ8JWu3pZwiJHCMiZG')
 ON CONFLICT (username) DO NOTHING;
