@@ -27,8 +27,3 @@ CREATE TABLE IF NOT EXISTS items (
     type VARCHAR(10) NOT NULL,  -- 'pro' or 'con'
     FOREIGN KEY (decision_id) REFERENCES decisions (id) ON DELETE CASCADE
 );
-
--- Create an initial user for testing - with a hashed password for 'password'
-INSERT INTO users (username, email, password_hash)
-VALUES ('test', 'test@example.com', '$2b$12$1QkLGPXiYcV5OVRkQEV2NuJW7cTqAGNqQUiSQ8JWu3pZwiJHCMiZG')
-ON CONFLICT (username) DO NOTHING;

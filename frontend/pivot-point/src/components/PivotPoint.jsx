@@ -99,7 +99,8 @@ const PivotPoint = () => {
     // Map the difference to a degree between -30 and 30
     const difference = prosTotal - Math.abs(consTotal);
     const maxDiff = 30;
-    return Math.max(-30, Math.min(30, difference / 3));
+    // Negate the value to correct the tilt direction
+    return -1 * Math.max(-30, Math.min(30, difference / 3));
   };
 
   const tiltDegree = calculateTilt();
@@ -644,7 +645,7 @@ const PivotPoint = () => {
       )}
 
       {/* Sidebar */}
-      <div className={`w-64 p-4 border-r ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      <div className={`w-80 p-4 border-r ${darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-xl font-bold">Pivot Point</h1>
           <button
@@ -810,14 +811,6 @@ const PivotPoint = () => {
                 </li>
               )}
             </ul>
-            <button
-              onClick={() => addItem('pro')}
-              className={`w-full py-2 rounded ${
-                darkMode ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'
-              }`}
-            >
-              + Add Pro
-            </button>
           </div>
 
           {/* Cons List */}
@@ -853,23 +846,15 @@ const PivotPoint = () => {
                 </li>
               )}
             </ul>
-            <button
-              onClick={() => addItem('con')}
-              className={`w-full py-2 rounded ${
-                darkMode ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-red-600 hover:bg-red-700 text-white'
-              }`}
-            >
-              + Add Con
-            </button>
           </div>
         </div>
 
         {/* Scale Visualization */}
-        <div className={`p-6 rounded-lg mb-8 text-center ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+        <div className={`p-6 rounded-lg mb-8 text-center`}>
           <div className="relative h-40 mb-8">
             <div className="absolute left-1/2 top-4 w-4 h-24 bg-gray-500 transform -translate-x-1/2 rounded"></div>
             <div
-              className="absolute left-1/2 top-4 w-64 h-8 bg-gray-400 transform -translate-x-1/2 origin-center transition-transform duration-500"
+              className="absolute left-1/2 top-4 w-64 h-8 transform -translate-x-1/2 origin-center transition-transform duration-500"
               style={{ transform: `translateX(-50%) rotate(${tiltDegree}deg)` }}
             >
               <div className="absolute left-0 top-0 bottom-0 w-32 bg-green-500 rounded-l-lg"></div>
@@ -886,7 +871,7 @@ const PivotPoint = () => {
           </div>
 
           <div
-            className={`inline-block px-6 py-3 rounded-full font-bold text-xl ${
+            className={`inline-block px-6 py-3 rounded-full font-bold text-xl shadow-lg ${
               recommendation.type === 'yes'
                 ? (darkMode ? 'bg-green-800 text-green-200' : 'bg-green-500 text-white')
                 : recommendation.type === 'no'
