@@ -4,9 +4,11 @@ A decision-making tool to weigh pros and cons and reach better decisions.
 
 ## Live Demo
 
-The application is deployed and can be accessed at:
-- Frontend: https://johnny0595.github.io/PivotPoint
-- Backend API: https://pivotpoint-backend.onrender.com
+The application is deployed and can be accessed at: https://johnny0595.github.io/PivotPoint
+
+## Video Demo
+[![Demo](https://img.youtube.com/vi/jem7DY_ueck/0.jpg)](https://www.youtube.com/watch?v=jem7DY_ueck)
+
 
 ## Features
 
