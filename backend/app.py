@@ -28,7 +28,7 @@ logger.info(f"CORS_ORIGINS: {CORS_ORIGINS}")
 CORS(app, origins=CORS_ORIGINS, supports_credentials=True)
 
 # Remote database connection (for Render deployment)
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://pivotpoint_user:cz3dsklwcuWHBL1WfGHY8kD6fwBpaWwy@dpg-cvgd3plrie7s73bofiig-a.oregon-postgres.render.com/pivotpoint')
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://pivotpoint_user:DWqcnUR502Yc9P2qz0LDb0Eg1kluXyBN@dpg-d0aga7euk2gs73ar6sl0-a.ohio-postgres.render.com/pivpoint')
 
 # If the URL starts with postgres://, change it to postgresql:// (Render compatibility)
 if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
