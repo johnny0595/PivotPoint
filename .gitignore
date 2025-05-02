@@ -1,2 +1,3 @@
 backend/.env
 frontend/pivot-point/.env.production
+frontend/pivot-point/.env.development
