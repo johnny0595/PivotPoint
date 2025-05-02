@@ -8,7 +8,7 @@ services:
     startCommand: gunicorn app:app
     envVars:
       - key: DATABASE_URL
-        value: postgresql://pivotpoint_user:cz3dsklwcuWHBL1WfGHY8kD6fwBpaWwy@dpg-cvgd3plrie7s73bofiig-a.oregon-postgres.render.com/pivotpoint
+        value: postgresql://pivotpoint_user:DWqcnUR502Yc9P2qz0LDb0Eg1kluXyBN@dpg-d0aga7euk2gs73ar6sl0-a.ohio-postgres.render.com/pivpoint
       - key: FLASK_ENV
         value: production
       - key: FLASK_APP
@@ -17,6 +17,6 @@ services:
         value: "https://johnny0595.github.io"
 
 databases:
-  - name: pivotpoint-db
+  - name: pivotpointPSQL
     databaseName: pivotpoint
     user: pivotpoint_user
