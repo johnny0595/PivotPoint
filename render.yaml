@@ -2,7 +2,7 @@ services:
   - type: web
     name: pivotpoint-backend
     env: python
-    region: oregon  # Choose the region closest to your users
+    region: ohio
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
